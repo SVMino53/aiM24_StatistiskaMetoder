@@ -1,6 +1,10 @@
 import math
 import matplotlib.pyplot as plt
+from scipy.special import hyp2f1
+
 from typing import Callable
+
+import scipy.special
 
 
 
@@ -37,10 +41,6 @@ def mad(elements: list[int | float]) -> float:
     n = len(elements)
     return sum([abs(x - m) for x in elements])/n
 
-def z_pdf(z: float) -> float: 
-    return math.e**(-(z**2)/2)/math.sqrt(2*math.pi)
-def z_cdf(z: float) -> float: 
-    return 0.5*(1 + math.erf(z/math.sqrt(2)))
 def t_pdf(df: int, t: float) -> float:
     return math.gamma((df + 1)/2)/(math.sqrt(math.pi*df)*math.gamma(df/2))*(1 + t**2/df)**(-(df + 1)/2)
 def t_cdf(df: int, t: float) -> float:
@@ -66,12 +66,40 @@ class DiscreteDist:
         x = [x for x in range(len(self.weights))]
         ax.bar(x, [self.fprobability(xi) for xi in x])
 
+class FDiscreteDist:
+    def __init__(self, p_func: Callable[[int], float], f_func: Callable[[int], float]):
+        self.p_func = p_func
+        self.f_func = f_func
+    def probability(self, x) -> float:
+        return self.p_func(x)
+    def fprobability(self, x) -> float:
+        return self.f_func(x)
+    def graph(self, ax: plt.Axes, x_min: int, x_max: int) -> None:
+        x = list(range(x_min, x_max + 1))
+        ax.bar(x, [self.p_func(xi) for xi in x])
+    def fgraph(self, ax: plt.Axes, x_min: int, x_max: int) -> None:
+        x = list(range(x_min, x_max + 1))
+        ax.bar(x, [self.f_func(xi) for xi in x])
+
 class BinomialDist(DiscreteDist):
     def __init__(self, n: int, p: float) -> None:
-        super().__init__()
+        super().__init__([math.comb(n, x)*p**x*(1 - p)**(n - x) for x in range(n + 1)])
+        self.n = n
+        self.p = p
+    def expected(self):
+        return self.n*self.p
+    def variance(self):
+        return self.n*self.p*(1 - self.p)
 
-class PoissonDist(DiscreteDist):
-    pass
+class PoissonDist(FDiscreteDist):
+    def __init__(self, mu: float) -> None:
+        super().__init__(lambda x: math.e**(-mu)*mu**x/math.factorial(x),
+                         lambda x: math.e**(-mu)*sum([mu**xi/math.factorial(xi) for xi in range(x + 1)]))
+        self.mu = mu
+    def expected(self):
+        return self.mu
+    def variance(self):
+        return self.mu
 
 class GeometricDist(DiscreteDist):
     pass
@@ -100,6 +128,12 @@ class ExponentialDist(ContinuousDist):
         return super().graph(ax, 0, 4*self.mu, ticks)
     def fgraph(self, ax, ticks = 100):
         return super().fgraph(ax, 0, 4*self.mu, ticks)
+    def expected(self) -> float:
+        return self.mu
+    def variance(self) -> float:
+        return self.mu**2
+    def standard_dev(self) -> float:
+        return self.mu
 
 class NormalDist(ContinuousDist):
     def __init__(self, mu: float, s: float):
@@ -111,3 +145,25 @@ class NormalDist(ContinuousDist):
         return super().graph(ax, self.mu - 4*self.s, self.mu + 4*self.s, ticks)
     def fgraph(self, ax, ticks = 100):
         return super().fgraph(ax, self.mu - 4*self.s, self.mu + 4*self.s, ticks)
+    def expected(self) -> float:
+        return self.mu
+    def variance(self) -> float:
+        return self.s**2
+    def standard_dev(self) -> float:
+        return self.s
+    def __add__(self, other: "NormalDist") -> "NormalDist":
+        return NormalDist(self.mu + other.mu, math.sqrt(self.s**2 + other.s**2))
+    
+class ZDist(NormalDist):
+    def __init__(self):
+        super().__init__(0, 1)
+
+class TDist(ContinuousDist):
+    def __init__(self, df: int):
+        super().__init__(lambda x: math.gamma((df + 1)/2)/(math.sqrt(math.pi*df)*math.gamma(df/2))*(1 + x**2/df)**(-(df + 1)/2),
+                         lambda x: 0.5 + x*math.gamma((df + 1)/2)*hyp2f1(0.5, (df + 1)/2, 1.5, -(x**2/df))/(math.sqrt(math.pi*df)*math.gamma(df/2)))
+        self.df = df
+    def graph(self, ax, ticks = 100):
+        return super().graph(ax, -4, 4, ticks)
+    def fgraph(self, ax, ticks = 100):
+        return super().fgraph(ax, -4, 4, ticks)
