@@ -1,10 +1,7 @@
 import math
 import matplotlib.pyplot as plt
 from scipy.special import hyp2f1
-
-from typing import Callable
-
-import scipy.special
+from typing import Callable, Literal
 
 
 
@@ -24,77 +21,116 @@ def q2(elements: list[int | float]) -> float:
 def q3(elements: list[int | float]) -> float:
     return quartile(3, elements=elements)
 
-def variance(elements: list[int | float]) -> float:
+def expected(elements: list[int | float]) -> float:
+    return mean(elements=elements)
+def variance(elements: list[int | float], v_type: Literal["pop", "samp"] = "pop") -> float:
     m = mean(elements=elements)
     n = len(elements)
-    return sum([(x - m)**2 for x in elements])/(n - 1)
-def pvariance(elements: list[int | float]) -> float:
-    m = mean(elements=elements)
-    n = len(elements)
-    return sum([(x - m)**2 for x in elements])/n
-def standard_dev(elements: list[int | float]) -> float:
-    return math.sqrt(variance(elements=elements))
-def pstandard_dev(elements: list[int | float]) -> float:
-    return math.sqrt(pvariance(elements=elements))
+    if v_type == "pop":
+        return sum([(x - m)**2 for x in elements])/n
+    else:
+        return sum([(x - m)**2 for x in elements])/(n - 1)
+def standard_dev(elements: list[int | float], s_type: Literal["pop", "samp"] = "pop") -> float:
+    return math.sqrt(variance(elements=elements, v_type=s_type))
 def mad(elements: list[int | float]) -> float:
     m = mean(elements=elements)
     n = len(elements)
     return sum([abs(x - m) for x in elements])/n
 
-def t_pdf(df: int, t: float) -> float:
-    return math.gamma((df + 1)/2)/(math.sqrt(math.pi*df)*math.gamma(df/2))*(1 + t**2/df)**(-(df + 1)/2)
-def t_cdf(df: int, t: float) -> float:
-    pass
 
 class DiscreteDist:
     def __init__(self, weights: list[int | float]) -> None:
         total_weight = sum(weights)
-        self.weights = [weight/total_weight for weight in weights]
+        self._weights = [weight/total_weight for weight in weights]
+        self._e_x = sum([x*p for x, p in enumerate(self.weights)])
+        self._v_x = sum([(x - self.expected())**2*p for x, p in enumerate(self.weights)])
+        self._s_x = math.sqrt(self._v_x)
+
+    @property
+    def weights(self):
+        return self._weights
+    @property
+    def e_x(self) -> float:
+        return self._e_x
+    @property
+    def v_x(self) -> float:
+        return self._v_x
+    @property
+    def s_x(self) -> float:
+        return self._s_x
+
     def expected(self) -> float:
-        return sum([x*p for x, p in enumerate(self.weights)])
+        return self.e_x
     def variance(self) -> float:
-        return sum([(x - self.expected())**2*p for x, p in enumerate(self.weights)])
+        return self.v_x
     def standard_dev(self) -> float:
-        return math.sqrt(self.variance())
+        return self.s_x
     def probability(self, x) -> float:
         return self.weights[x]
+    def cumulative_probability(self, x) -> float:
+        return sum([self.probability(xi) for xi in range(x + 1)])
+    def probability_graph(self, ax: plt.Axes) -> None:
+        ax.bar(list(range(len(self.weights))), self.weights)
+    def cumulative_graph(self, ax: plt.Axes) -> None:
+        x = list(range(len(self.weights)))
+        ax.bar(x, [self.cumulative_probability(xi) for xi in x])
+
+class FDiscreteDist(DiscreteDist):
+    def __init__(self, pdf: Callable[[int], float], *, n: int | None = None,
+                 exp: float | None = None, var: float | None = None):
+        self._pdf = pdf
+        self._n = n
+        if exp is None:
+            if n is None:
+                lim = 1000000
+            else:
+                lim = n + 1
+            exp_sum = 0
+            for x in range(lim):
+                exp_sum += x*pdf(x)
+            self._e_x = exp_sum/(lim)
+        else:
+            self._e_x = exp
+        if var is None:
+            if n is None:
+                lim = 1000000
+            else:
+                lim = n + 1
+            var_sum = 0
+            for x in range(lim):
+                var_sum += (x - self._e_x)**2
+            self._e_x = var_sum/(lim)
+        else:
+            self._v_x = var
+        self._s_x = math.sqrt(self.v_x)
+
+    @property
+    def pdf(self) -> Callable[[int], float]:
+        return self._pdf
+    
+    def probability(self, x) -> float:
+        return self.pdf(x)
     def fprobability(self, x) -> float:
         return sum([self.probability(xi) for xi in range(x + 1)])
-    def graph(self, ax: plt.Axes) -> None:
-        ax.bar([x for x in range(len(self.weights))], self.weights)
-    def fgraph(self, ax: plt.Axes) -> None:
-        x = [x for x in range(len(self.weights))]
-        ax.bar(x, [self.fprobability(xi) for xi in x])
-
-class FDiscreteDist:
-    def __init__(self, p_func: Callable[[int], float], f_func: Callable[[int], float]):
-        self.p_func = p_func
-        self.f_func = f_func
-    def probability(self, x) -> float:
-        return self.p_func(x)
-    def fprobability(self, x) -> float:
-        return self.f_func(x)
     def graph(self, ax: plt.Axes, x_min: int, x_max: int) -> None:
         x = list(range(x_min, x_max + 1))
-        ax.bar(x, [self.p_func(xi) for xi in x])
+        ax.bar(x, [self.probability(xi) for xi in x])
     def fgraph(self, ax: plt.Axes, x_min: int, x_max: int) -> None:
         x = list(range(x_min, x_max + 1))
-        ax.bar(x, [self.f_func(xi) for xi in x])
+        ax.bar(x, [self.fprobability(xi) for xi in x])
 
-class BinomialDist(DiscreteDist):
+class BinomialDist(FDiscreteDist):
     def __init__(self, n: int, p: float) -> None:
-        super().__init__([math.comb(n, x)*p**x*(1 - p)**(n - x) for x in range(n + 1)])
-        self.n = n
-        self.p = p
-    def expected(self):
-        return self.n*self.p
-    def variance(self):
-        return self.n*self.p*(1 - self.p)
+        super().__init__(lambda x: math.comb(n, x)*p**x*(1 - p)**(n - x), n=n, exp=n*p, var=n*p*(1 - p))
+        self._p = p
+
+    @property
+    def p(self) -> float:
+        return self._p
 
 class PoissonDist(FDiscreteDist):
     def __init__(self, mu: float) -> None:
-        super().__init__(lambda x: math.e**(-mu)*mu**x/math.factorial(x),
-                         lambda x: math.e**(-mu)*sum([mu**xi/math.factorial(xi) for xi in range(x + 1)]))
+        super().__init__(lambda x: math.e**(-mu)*mu**x/math.factorial(x))
         self.mu = mu
     def expected(self):
         return self.mu
